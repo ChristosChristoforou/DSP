@@ -60,6 +60,8 @@ cplx_buff Spectral_Density(cplx_buff* vector_1, cplx_buff* vector_2);
 
 //Coherence
 
+cplx_buff Coherence(cplx_buff* vector_1, cplx_buff* vector_2);
+
 //Scaled correlation
 
 
@@ -81,7 +83,7 @@ int main(){
         cartisian_to_polar(&arr_2.array[i]);
     }
 
-    cplx_buff conv = Spectral_Density(&arr_1, &arr_2);
+    cplx_buff conv = Coherence(&arr_1, &arr_2);
     print_vector("Convolution", conv);
 
 
@@ -254,8 +256,6 @@ cplx_buff Correlation(cplx_buff* vector_1, cplx_buff* vector_2){
     proxy_2.array = (complex*)malloc(sizeof(complex) * proxy_2.len);
     prod.len = vector_1->len;
     prod.array = (complex*)malloc(sizeof(complex) * prod.len);
-    tmp.len = vector_1->len;
-    tmp.array = (complex*)malloc(sizeof(complex) * tmp.len);
 
 
     FFT(vector_1, &proxy_1);
@@ -267,7 +267,6 @@ cplx_buff Correlation(cplx_buff* vector_1, cplx_buff* vector_2){
     }
     
     IFFT(&prod, &corr);
-    _FFT(corr.array, corr.len, tmp.array);
 
     free(proxy_1.array);
     free(proxy_2.array);
@@ -276,18 +275,19 @@ cplx_buff Correlation(cplx_buff* vector_1, cplx_buff* vector_2){
 }
 
 cplx_buff Spectral_Density(cplx_buff* vector_1, cplx_buff* vector_2){
-    cplx_buff corr;
-    corr.len = vector_1->len;
-    corr.array = (complex*)malloc(sizeof(complex) * corr.len);
+    cplx_buff Spectr;
+    Spectr.len = vector_1->len;
+    Spectr.array = (complex*)malloc(sizeof(complex) * Spectr.len);
 
-    cplx_buff proxy_1, proxy_2, prod;
+    cplx_buff proxy_1, proxy_2, prod, tmp;
     proxy_1.len = vector_1->len;
     proxy_1.array = (complex*)malloc(sizeof(complex) * proxy_1.len);
     proxy_2.len = vector_2->len;
     proxy_2.array = (complex*)malloc(sizeof(complex) * proxy_2.len);
     prod.len = vector_1->len;
     prod.array = (complex*)malloc(sizeof(complex) * prod.len);
-
+    tmp.len = vector_1->len;
+    tmp.array = (complex*)malloc(sizeof(complex) * tmp.len);
 
     FFT(vector_1, &proxy_1);
     FFT(vector_2, &proxy_2);
@@ -297,10 +297,53 @@ cplx_buff Spectral_Density(cplx_buff* vector_1, cplx_buff* vector_2){
         prod.array[i].cartisian.imaginary = proxy_1.array[i].cartisian.real * proxy_2.array[i].cartisian.imaginary - proxy_1.array[i].cartisian.imaginary * proxy_2.array[i].cartisian.real; /* Im(~{proxy_1[i]}*proxy_2[i]) */
     }
     
-    IFFT(&prod, &corr);
+    IFFT(&prod, &Spectr);
+    _FFT(Spectr.array, Spectr.len, tmp.array);
 
     free(proxy_1.array);
     free(proxy_2.array);
     free(prod.array);
-    return corr;
+    free(tmp.array);
+    return Spectr;
+}
+
+cplx_buff Coherence(cplx_buff* vector_1, cplx_buff* vector_2){
+    cplx_buff cohr;
+    cohr.len = vector_1->len;
+    cohr.array = (complex*)malloc(sizeof(complex) * cohr.len);
+
+    cplx_buff spctr_xy, spctr_xx, spctr_yy, tmp;
+    spctr_xy = Spectral_Density(vector_1, vector_2);
+    spctr_xx = Spectral_Density(vector_1, vector_1);
+    spctr_yy = Spectral_Density(vector_2, vector_2);
+    tmp.len = vector_1->len;
+    tmp.array = (complex*)malloc(sizeof(complex) * tmp.len);
+    
+    for (size_t k = 0; k < spctr_xy.len; k++){
+        //Numerator
+        spctr_xy.array[k].cartisian.real = pow(sqrt(pow(spctr_xy.array[k].cartisian.real, 2) + pow(spctr_xy.array[k].cartisian.imaginary, 2)), 2);
+        spctr_xy.array[k].cartisian.real = 0;
+
+        //Denominator
+        tmp.array[k].cartisian.real = spctr_xx.array[k].cartisian.real * spctr_yy.array[k].cartisian.real - spctr_xx.array[k].cartisian.imaginary * spctr_yy.array[k].cartisian.imaginary;	/* Re(spctr_xx * spctr_yy) */
+        tmp.array[k].cartisian.imaginary = spctr_xx.array[k].cartisian.real * spctr_yy.array[k].cartisian.imaginary + spctr_xx.array[k].cartisian.imaginary * spctr_yy.array[k].cartisian.real; /* Im(spctr_xx * spctr_yy) */
+        cartisian_to_polar(&tmp.array[k]);
+        tmp.array[k].polar.magnitude = 1/tmp.array[k].polar.magnitude;
+        tmp.array[k].polar.angle = -tmp.array[k].polar.angle;
+        polar_to_cartisian(&tmp.array[k]);
+
+    }
+
+  
+    for (size_t k = 0; k < cohr.len; k++){
+        cohr.array[k].cartisian.real = spctr_xy.array[k].cartisian.real * tmp.array[k].cartisian.real - spctr_xy.array[k].cartisian.imaginary * tmp.array[k].cartisian.imaginary;	/* Re(|spctr_xy|^2 * tmp) */
+        cohr.array[k].cartisian.imaginary = spctr_xy.array[k].cartisian.real * tmp.array[k].cartisian.imaginary + spctr_xy.array[k].cartisian.imaginary * tmp.array[k].cartisian.real; /* Im(|spctr_xy|^2 * tmp) */
+    }
+
+
+    free(spctr_xy.array);
+    free(spctr_xx.array);
+    free(spctr_yy.array);
+    free(tmp.array);
+    return cohr;
 }
