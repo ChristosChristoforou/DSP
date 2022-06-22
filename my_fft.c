@@ -64,6 +64,8 @@ cplx_buff Coherence(cplx_buff* vector_1, cplx_buff* vector_2);
 
 //Scaled correlation
 
+cplx_buff Scaled_Corelation(cplx_buff* vector_1, cplx_buff* vector_2, size_t scale);
+
 
 int main(){
 
@@ -83,7 +85,7 @@ int main(){
         cartisian_to_polar(&arr_2.array[i]);
     }
 
-    cplx_buff conv = Coherence(&arr_1, &arr_2);
+    cplx_buff conv = Scaled_Corelation(&arr_1, &arr_2, 2);
     print_vector("Convolution", conv);
 
 
@@ -346,4 +348,99 @@ cplx_buff Coherence(cplx_buff* vector_1, cplx_buff* vector_2){
     free(spctr_yy.array);
     free(tmp.array);
     return cohr;
+}
+
+cplx_buff Scaled_Corelation(cplx_buff* vector_1, cplx_buff* vector_2, size_t scale){
+
+    size_t K = round(vector_1->len/scale);
+
+    cplx_buff scorel;
+    scorel.len = vector_1->len - vector_1->len % K;
+    scorel.array = (complex*)malloc(sizeof(complex) * scorel.len);
+
+    // https://en.wikipedia.org/wiki/Pearson_correlation_coefficient#For_a_sample
+
+    complex mean_1, mean_2, tmp1, tmp2, median_prod, ssd_prod;
+    cplx_buff sx, sy;
+    sx.len = scale;
+    sx.array = (complex*)malloc(sizeof(complex) * sx.len);
+    sy.len = K;
+    sy.array = (complex*)malloc(sizeof(complex) * sy.len);
+
+    for (size_t k = 0; k < K; k++){
+        mean_1.cartisian.real = 0;
+        mean_1.cartisian.imaginary = 0;
+        mean_2.cartisian.real = 0;
+        mean_2.cartisian.imaginary = 0;
+        for (size_t i = 0; i < scale; i++){
+            mean_1.cartisian.real += vector_1->array[i + k].cartisian.real;
+            mean_1.cartisian.imaginary += vector_1->array[i + k].cartisian.imaginary;
+            mean_2.cartisian.real += vector_2->array[i + k].cartisian.real;
+            mean_2.cartisian.imaginary += vector_2->array[i + k].cartisian.imaginary;
+        }
+        mean_1.cartisian.real = mean_1.cartisian.real / scale;
+        mean_1.cartisian.imaginary = mean_1.cartisian.imaginary / scale;
+        mean_2.cartisian.real = mean_2.cartisian.real / scale;
+        mean_2.cartisian.imaginary = mean_2.cartisian.imaginary / scale;
+
+        sx.array[k].cartisian.real = 0;
+        sx.array[k].cartisian.imaginary = 0;
+        sy.array[k].cartisian.real = 0;
+        sy.array[k].cartisian.imaginary = 0;
+        for (size_t i = 0; i < scale; i++){
+            tmp1.cartisian.real = vector_1->array[i + k].cartisian.real - mean_1.cartisian.real;
+            tmp1.cartisian.imaginary = vector_1->array[i + k].cartisian.imaginary - mean_1.cartisian.imaginary;
+
+            sx.array[k].cartisian.real += tmp1.cartisian.real * tmp1.cartisian.real - tmp1.cartisian.imaginary * tmp1.cartisian.imaginary; /* Re((xi-X)^2) */
+            sx.array[k].cartisian.imaginary += tmp1.cartisian.real * tmp1.cartisian.imaginary + tmp1.cartisian.imaginary * tmp1.cartisian.real; /* Im((xi-X)^2) */
+
+            tmp1.cartisian.real = vector_2->array[i + k].cartisian.real - mean_2.cartisian.real;
+            tmp1.cartisian.imaginary = vector_2->array[i + k].cartisian.imaginary - mean_2.cartisian.imaginary;
+            
+            sy.array[k].cartisian.real += tmp1.cartisian.real * tmp1.cartisian.real - tmp1.cartisian.imaginary * tmp1.cartisian.imaginary; /* Re((yi-Y)^2) */
+            sy.array[k].cartisian.imaginary += tmp1.cartisian.real * tmp1.cartisian.imaginary + tmp1.cartisian.imaginary * tmp1.cartisian.real; /* Im((yi-Y)^2) */
+        }
+
+        // sqrt(sx/n-1)
+        sx.array[k].cartisian.real = sx.array[k].cartisian.real/(scale - 1);
+        sx.array[k].cartisian.imaginary = sx.array[k].cartisian.imaginary/(scale - 1);
+        cartisian_to_polar(&sx.array[k]);
+        sx.array[k].polar.magnitude = sqrt(sx.array[k].polar.magnitude);
+        sx.array[k].polar.angle = sx.array[k].polar.angle / 2;
+        polar_to_cartisian(&sx.array[k]);
+        
+        // sqrt(sy/n-1)
+        sy.array[k].cartisian.real = sy.array[k].cartisian.real/(scale - 1);
+        sy.array[k].cartisian.imaginary = sy.array[k].cartisian.imaginary/(scale - 1);
+        cartisian_to_polar(&sy.array[k]);
+        sy.array[k].polar.magnitude = sqrt(sy.array[k].polar.magnitude);
+        sy.array[k].polar.angle = sy.array[k].polar.angle / 2;
+        polar_to_cartisian(&sy.array[k]);
+
+        // (n-1)sx*sy
+        ssd_prod.cartisian.real = (scale - 1) * (sx.array[K].cartisian.real * sy.array[K].cartisian.real - sx.array[K].cartisian.imaginary * sy.array[K].cartisian.imaginary); /* (scale - 1) * Re(sx*sy) */
+        ssd_prod.cartisian.imaginary = (scale - 1) * (sx.array[K].cartisian.real * sy.array[K].cartisian.imaginary + sx.array[K].cartisian.imaginary * sy.array[K].cartisian.real); /* scale *Im((yi-Y)^2) */
+
+        //Sum(xiyi)
+        tmp2.cartisian.real = 0;
+        tmp2.cartisian.imaginary = 0;
+        for (size_t i = 0; i < scale; i++){
+            tmp2.cartisian.real += vector_1->array[i + k].cartisian.real * vector_2->array[i + k].cartisian.real - vector_1->array[i + k].cartisian.imaginary * vector_2->array[i + k].cartisian.imaginary; /* Re((yi-Y)^2) */
+            tmp2.cartisian.imaginary += vector_1->array[i + k].cartisian.real * vector_2->array[i + k].cartisian.imaginary + vector_1->array[i + k].cartisian.imaginary * vector_2->array[i + k].cartisian.real; /* Im((yi-Y)^2) */
+        }
+        median_prod.cartisian.real = scale * (mean_1.cartisian.real * mean_2.cartisian.real - mean_1.cartisian.imaginary * mean_2.cartisian.imaginary); /* scale * Re(XY) */
+        median_prod.cartisian.imaginary = scale * (mean_1.cartisian.real * mean_2.cartisian.imaginary + mean_1.cartisian.imaginary * mean_2.cartisian.real); /* scale *Im((yi-Y)^2) */
+
+        scorel.array[k].cartisian.real = tmp2.cartisian.real - median_prod.cartisian.real;
+        scorel.array[k].cartisian.imaginary = tmp2.cartisian.imaginary - median_prod.cartisian.imaginary;
+        cartisian_to_polar(&scorel.array[k]);
+        cartisian_to_polar(&ssd_prod);
+        scorel.array[k].polar.magnitude = scorel.array[k].polar.magnitude / ssd_prod.polar.magnitude;
+        scorel.array[k].polar.angle = scorel.array[k].polar.angle - ssd_prod.polar.angle;
+        polar_to_cartisian(&scorel.array[k]);
+    }
+    
+    free(sx.array);
+    free(sy.array);
+    return scorel;
 }
